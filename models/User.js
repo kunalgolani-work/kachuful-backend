@@ -28,22 +28,8 @@ const userSchema = new mongoose.Schema({
       highestScore: { type: Number, default: 0 }
     }
   }],
-  games: [{
-    id: String,
-    date: Date,
-    rounds: Number,
-    players: [{
-      name: String,
-      cardId: String,
-      photo: String,
-      score: Number,
-      wins: Number,
-      totalRounds: Number,
-      totalBids: Number,
-      zeros: Number
-    }],
-    mayhemRounds: [Number]
-  }]
+  // Store only game IDs (references) - full game data is in Games collection
+  games: [String] // Array of gameId strings
 }, {
   timestamps: true
 });

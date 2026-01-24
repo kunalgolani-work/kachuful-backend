@@ -206,38 +206,15 @@ router.post('/:gameId/finish', auth, async (req, res) => {
 
     await game.save();
 
-    // Update user's game history
+    // Add game reference to user (only gameId, not full data)
     const user = await User.findById(req.user._id);
-    user.games.push({
-      id: gameId,
-      date: game.date,
-      rounds: game.rounds,
-      players: game.players,
-      mayhemRounds: game.mayhemRounds
-    });
+    if (!user.games.includes(gameId)) {
+      user.games.push(gameId);
+      await user.save();
+    }
 
-    // Update player card stats
-    game.players.forEach(player => {
-      if (player.cardId) {
-        const card = user.playerCards.find(c => c.id === player.cardId);
-        if (card) {
-          card.stats.gamesPlayed++;
-          card.stats.totalRounds += player.totalRounds;
-          card.stats.wins += player.wins;
-          card.stats.totalScore += player.score;
-          if (player.score > card.stats.highestScore) {
-            card.stats.highestScore = player.score;
-          }
-          
-          const sortedPlayers = [...game.players].sort((a, b) => b.score - a.score);
-          if (sortedPlayers[0].name === player.name) {
-            card.stats.gamesWon++;
-          }
-        }
-      }
-    });
-
-    await user.save();
+    // Note: Player statistics are now calculated dynamically from Games collection
+    // See /api/users/stats/:cardId endpoint for real-time stats calculation
 
     res.json({ message: 'Game finished successfully', game });
   } catch (error) {

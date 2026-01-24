@@ -15,6 +15,7 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/games', require('./routes/games'));
 app.use('/api/players', require('./routes/players'));
+app.use('/api/users', require('./routes/users'));
 
 // Connect to MongoDB
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://dbQH:kunal2001@clusterqh.pvbet.mongodb.net/kachuful?retryWrites=true&w=majority';
