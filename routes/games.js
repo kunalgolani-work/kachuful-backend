@@ -40,11 +40,55 @@ router.get('/active', auth, async (req, res) => {
   }
 });
 
+// Generate Mayhem rounds for a new game
+const generateMayhemRounds = (numPlayers) => {
+  const mayhemRounds = [];
+  const minRound = 2;
+  const maxRound = 30;
+  const minGap = 4; // Minimum rounds between any two mayhem rounds
+
+  // 3-5 mayhem rounds, 2x only
+  const numMayhemRounds = 3 + Math.floor(Math.random() * 3);
+
+  const pool = [];
+  for (let r = minRound; r <= maxRound; r++) pool.push(r);
+
+  let selectedRounds = [];
+  for (let attempt = 0; attempt < 100; attempt++) {
+    // Shuffle and pick
+    const shuffled = [...pool];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    selectedRounds = shuffled.slice(0, numMayhemRounds).sort((a, b) => a - b);
+
+    // Check minimum gap
+    let ok = true;
+    for (let i = 1; i < selectedRounds.length; i++) {
+      if (selectedRounds[i] - selectedRounds[i - 1] < minGap) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) break;
+  }
+
+  selectedRounds.forEach(round => {
+    mayhemRounds.push({ round, multiplier: 2 });
+  });
+
+  return mayhemRounds;
+};
+
 // Create new game
 router.post('/', auth, async (req, res) => {
   try {
     const { players, enforceBidCap } = req.body;
     const gameId = uuidv4();
+    
+    // Generate mayhem rounds for this game
+    const mayhemRounds = generateMayhemRounds(players.length);
 
     const game = new Game({
       userId: req.user._id,
@@ -59,6 +103,7 @@ router.post('/', auth, async (req, res) => {
         totalBids: 0,
         zeros: 0
       })),
+      mayhemRounds: mayhemRounds.map(m => m.round), // Store just round numbers in Game model
       currentRound: 1,
       phase: 'BID',
       gameState: {
@@ -82,6 +127,7 @@ router.post('/', auth, async (req, res) => {
         pendingChaos: false,
         pendingChaosLastIdx: null,
         currentMayhemMultiplier: 1,
+        mayhemRounds: mayhemRounds, // Store full objects with multipliers in gameState
         selectedPlayerCards: [],
         history: []
       }
