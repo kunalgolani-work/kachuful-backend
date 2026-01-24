@@ -18,7 +18,31 @@ router.get('/', auth, async (req, res) => {
     const games = await Game.find(query)
       .sort({ date: -1 })
       .limit(50);
-    res.json(games);
+    
+    // Ensure mayhemRounds is properly formatted in gameState
+    const gamesWithMayhem = games.map(game => {
+      const gameObj = game.toObject();
+      
+      // If gameState.mayhemRounds is missing or is array of numbers, reconstruct it
+      if (!gameObj.gameState?.mayhemRounds || 
+          (Array.isArray(gameObj.gameState.mayhemRounds) && 
+           gameObj.gameState.mayhemRounds.length > 0 && 
+           typeof gameObj.gameState.mayhemRounds[0] === 'number')) {
+        // Convert from numbers to objects
+        const mayhemRoundsNumbers = gameObj.mayhemRounds || [];
+        if (!gameObj.gameState) {
+          gameObj.gameState = {};
+        }
+        gameObj.gameState.mayhemRounds = mayhemRoundsNumbers.map(round => ({ 
+          round, 
+          multiplier: 2 
+        }));
+      }
+      
+      return gameObj;
+    });
+    
+    res.json(gamesWithMayhem);
   } catch (error) {
     console.error('Get games error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -33,7 +57,29 @@ router.get('/active', auth, async (req, res) => {
       'gameState.phase': { $in: ['BID', 'RESULT'] }
     }).sort({ createdAt: -1 });
     
-    res.json(game);
+    if (!game) {
+      return res.json(null);
+    }
+    
+    const gameObj = game.toObject();
+    
+    // Ensure mayhemRounds is properly formatted in gameState
+    if (!gameObj.gameState?.mayhemRounds || 
+        (Array.isArray(gameObj.gameState.mayhemRounds) && 
+         gameObj.gameState.mayhemRounds.length > 0 && 
+         typeof gameObj.gameState.mayhemRounds[0] === 'number')) {
+      // Convert from numbers to objects
+      const mayhemRoundsNumbers = gameObj.mayhemRounds || [];
+      if (!gameObj.gameState) {
+        gameObj.gameState = {};
+      }
+      gameObj.gameState.mayhemRounds = mayhemRoundsNumbers.map(round => ({ 
+        round, 
+        multiplier: 2 
+      }));
+    }
+    
+    res.json(gameObj);
   } catch (error) {
     console.error('Get active game error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -154,10 +200,13 @@ router.put('/:gameId/state', auth, async (req, res) => {
 
     if (gameState) {
       // Merge gameState instead of replacing
+      // Preserve mayhemRounds if not provided in update
       game.gameState = {
         ...game.gameState,
         ...gameState,
-        players: gameState.players || game.gameState.players
+        players: gameState.players || game.gameState.players,
+        // Preserve mayhemRounds if not being updated
+        mayhemRounds: gameState.mayhemRounds !== undefined ? gameState.mayhemRounds : game.gameState.mayhemRounds
       };
     }
     if (currentRound !== undefined) game.currentRound = currentRound;
@@ -188,7 +237,32 @@ router.post('/:gameId/finish', auth, async (req, res) => {
     }
 
     game.rounds = rounds;
-    game.mayhemRounds = mayhemRounds || [];
+    
+    // Preserve mayhemRounds from gameState if not provided, or convert from objects to round numbers
+    if (mayhemRounds && mayhemRounds.length > 0) {
+      // If mayhemRounds is array of objects, extract round numbers
+      if (typeof mayhemRounds[0] === 'object' && mayhemRounds[0].round) {
+        game.mayhemRounds = mayhemRounds.map(m => m.round);
+      } else {
+        // Already array of numbers
+        game.mayhemRounds = mayhemRounds;
+      }
+    } else if (game.gameState?.mayhemRounds && game.gameState.mayhemRounds.length > 0) {
+      // Extract round numbers from gameState.mayhemRounds objects
+      game.mayhemRounds = game.gameState.mayhemRounds.map(m => 
+        typeof m === 'object' ? m.round : m
+      );
+    } else {
+      // Fallback to existing mayhemRounds or empty array
+      game.mayhemRounds = game.mayhemRounds || [];
+    }
+    
+    // Preserve mayhemRounds in gameState as well
+    if (game.gameState) {
+      game.gameState.mayhemRounds = game.gameState.mayhemRounds || 
+        game.mayhemRounds.map(round => ({ round, multiplier: 2 }));
+    }
+    
     game.players = game.gameState.players.map(p => ({
       name: p.name,
       cardId: p.cardId,

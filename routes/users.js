@@ -14,8 +14,11 @@ router.get('/stats/:cardId', auth, async (req, res) => {
 
     // Find the player card
     const user = await User.findById(userId);
-    const playerCard = user.playerCards.find(c => c.id === cardId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
     
+    const playerCard = user.playerCards?.find(c => c.id === cardId);
     if (!playerCard) {
       return res.status(404).json({ message: 'Player card not found' });
     }
@@ -65,12 +68,20 @@ router.get('/stats/:cardId', auth, async (req, res) => {
     };
 
     // Process game history for suit stats
+    // Note: Old games may not have gameState.history, so suit stats will be empty for them
     games.forEach(game => {
       const player = game.players.find(p => p.cardId === cardId);
-      if (!player || !game.gameState?.history) return;
+      if (!player) return;
+      
+      // Skip if game doesn't have history (old games before history tracking was added)
+      if (!game.gameState?.history || !Array.isArray(game.gameState.history)) {
+        return;
+      }
 
       // Process each round in history
-      game.gameState.history.forEach((roundEntry, index) => {
+      game.gameState.history.forEach((roundEntry) => {
+        if (!roundEntry || typeof roundEntry.round !== 'number') return;
+        
         const suitIndex = (roundEntry.round - 1) % 4;
         const suitNames = ['Spades', 'Hearts', 'Clubs', 'Diamonds'];
         const suitName = suitNames[suitIndex];
