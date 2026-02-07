@@ -27,6 +27,14 @@ const gameSchema = new mongoose.Schema({
     zeros: Number
   }],
   mayhemRounds: [Number],
+  jokerRounds: [{
+    round: Number,
+    suit: String,
+    rank: String,
+    label: String,
+    symbol: String
+  }],
+  teamUpRounds: [Number],
   currentRound: {
     type: Number,
     default: 1
@@ -57,7 +65,11 @@ const gameSchema = new mongoose.Schema({
     pendingChaos: Boolean,
     pendingChaosLastIdx: Number,
     currentMayhemMultiplier: { type: Number, default: 1 },
-    selectedPlayerCards: [String]
+    selectedPlayerCards: [String],
+    mayhemRounds: [Object],
+    jokerRounds: [Object],
+    teamUpRounds: [Number],
+    teamPairs: [[Number]]
   }
 }, {
   timestamps: true

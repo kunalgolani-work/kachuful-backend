@@ -86,45 +86,76 @@ router.get('/active', auth, async (req, res) => {
   }
 });
 
-// Generate Mayhem rounds for a new game
-const generateMayhemRounds = (numPlayers) => {
-  const mayhemRounds = [];
-  const minRound = 2;
-  const maxRound = 30;
-  const minGap = 4; // Minimum rounds between any two mayhem rounds
+// Generate special rounds with 5-8 round gap (less overload, more breathing room)
+const MIN_GAP = 5;
+const MAX_GAP = 8;
+const TYPICAL_ROUNDS = 20;
 
-  // 3-5 mayhem rounds, 2x only
-  const numMayhemRounds = 3 + Math.floor(Math.random() * 3);
-
+const placeSpecialRoundsWithSpacing = (numSlots, excludeRounds = []) => {
+  const exclude = new Set(excludeRounds);
   const pool = [];
-  for (let r = minRound; r <= maxRound; r++) pool.push(r);
-
-  let selectedRounds = [];
-  for (let attempt = 0; attempt < 100; attempt++) {
-    // Shuffle and pick
-    const shuffled = [...pool];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    selectedRounds = shuffled.slice(0, numMayhemRounds).sort((a, b) => a - b);
-
-    // Check minimum gap
-    let ok = true;
-    for (let i = 1; i < selectedRounds.length; i++) {
-      if (selectedRounds[i] - selectedRounds[i - 1] < minGap) {
-        ok = false;
-        break;
-      }
-    }
-    if (ok) break;
+  for (let r = 2; r <= Math.min(TYPICAL_ROUNDS, 28); r++) {
+    if (!exclude.has(r)) pool.push(r);
   }
+  if (pool.length < numSlots) return [];
 
-  selectedRounds.forEach(round => {
-    mayhemRounds.push({ round, multiplier: 2 });
-  });
+  // Place first slot, then each next 3-6 rounds apart
+  const placed = [];
+  let lastRound = 0;
+  for (let i = 0; i < numSlots; i++) {
+    const minNext = lastRound + MIN_GAP;
+    const maxNext = lastRound + MAX_GAP;
+    const candidates = pool.filter(r => r >= minNext && r <= maxNext);
+    if (candidates.length === 0) {
+      const fallback = pool.filter(r => r > lastRound);
+      if (fallback.length === 0) break;
+      const pick = fallback[0];
+      placed.push(pick);
+      lastRound = pick;
+      pool.splice(pool.indexOf(pick), 1);
+    } else {
+      const pick = candidates[Math.floor(Math.random() * candidates.length)];
+      placed.push(pick);
+      lastRound = pick;
+      pool.splice(pool.indexOf(pick), 1);
+    }
+  }
+  return placed.sort((a, b) => a - b);
+};
 
-  return mayhemRounds;
+// Generate Mayhem rounds (spaced 5-8 apart, fewer rounds)
+const generateMayhemRounds = (numPlayers) => {
+  const numMayhem = 2 + Math.floor(Math.random() * 2); // 2-3 mayhem rounds
+  const rounds = placeSpecialRoundsWithSpacing(numMayhem, []);
+  return rounds.map(round => ({ round, multiplier: 2 }));
+};
+
+const SUITS = ['spades', 'hearts', 'clubs', 'diamonds'];
+const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+const SUIT_SYMBOLS = { spades: '♠', hearts: '♥', clubs: '♣', diamonds: '♦' };
+
+const pickRandomJokerCard = () => {
+  const suit = SUITS[Math.floor(Math.random() * SUITS.length)];
+  const rank = RANKS[Math.floor(Math.random() * RANKS.length)];
+  return {
+    suit, rank,
+    label: `${rank} of ${suit.charAt(0).toUpperCase() + suit.slice(1)}`,
+    symbol: SUIT_SYMBOLS[suit]
+  };
+};
+
+const generateJokerRounds = (mayhemRoundNumbers) => {
+  const numJoker = 1 + Math.floor(Math.random() * 2); // 1-2 joker rounds
+  const rounds = placeSpecialRoundsWithSpacing(numJoker, mayhemRoundNumbers || []);
+  return rounds.map(round => ({ round, ...pickRandomJokerCard() }));
+};
+
+const generateTeamUpRounds = (numPlayers, mayhemRoundNumbers, jokerRoundNumbers) => {
+  if (numPlayers % 2 !== 0) return [];
+  const exclude = [...(mayhemRoundNumbers || []), ...((jokerRoundNumbers || []).map(j => typeof j === 'object' ? j.round : j))];
+  const numTeam = 1; // 1 team round
+  const rounds = placeSpecialRoundsWithSpacing(numTeam, exclude);
+  return rounds;
 };
 
 // Create new game
@@ -133,8 +164,12 @@ router.post('/', auth, async (req, res) => {
     const { players, enforceBidCap } = req.body;
     const gameId = uuidv4();
     
-    // Generate mayhem rounds for this game
+    // Generate special rounds with 3-6 gap between each
     const mayhemRounds = generateMayhemRounds(players.length);
+    const mayhemRoundNumbers = mayhemRounds.map(m => m.round);
+    const jokerRounds = generateJokerRounds(mayhemRoundNumbers);
+    const jokerRoundNumbers = (jokerRounds || []).map(j => j.round);
+    const teamUpRounds = generateTeamUpRounds(players.length, mayhemRoundNumbers, jokerRoundNumbers);
 
     const game = new Game({
       userId: req.user._id,
@@ -149,7 +184,9 @@ router.post('/', auth, async (req, res) => {
         totalBids: 0,
         zeros: 0
       })),
-      mayhemRounds: mayhemRounds.map(m => m.round), // Store just round numbers in Game model
+      mayhemRounds: mayhemRounds.map(m => m.round),
+      jokerRounds,
+      teamUpRounds,
       currentRound: 1,
       phase: 'BID',
       gameState: {
@@ -173,7 +210,10 @@ router.post('/', auth, async (req, res) => {
         pendingChaos: false,
         pendingChaosLastIdx: null,
         currentMayhemMultiplier: 1,
-        mayhemRounds: mayhemRounds, // Store full objects with multipliers in gameState
+        mayhemRounds: mayhemRounds,
+        jokerRounds,
+        teamUpRounds,
+        teamPairs: [],
         selectedPlayerCards: [],
         history: []
       }
@@ -205,8 +245,11 @@ router.put('/:gameId/state', auth, async (req, res) => {
         ...game.gameState,
         ...gameState,
         players: gameState.players || game.gameState.players,
-        // Preserve mayhemRounds if not being updated
-        mayhemRounds: gameState.mayhemRounds !== undefined ? gameState.mayhemRounds : game.gameState.mayhemRounds
+        // Preserve mayhemRounds, jokerRounds, teamUpRounds, teamPairs if not being updated
+        mayhemRounds: gameState.mayhemRounds !== undefined ? gameState.mayhemRounds : game.gameState.mayhemRounds,
+        jokerRounds: gameState.jokerRounds !== undefined ? gameState.jokerRounds : game.gameState.jokerRounds,
+        teamUpRounds: gameState.teamUpRounds !== undefined ? gameState.teamUpRounds : game.gameState.teamUpRounds,
+        teamPairs: gameState.teamPairs !== undefined ? gameState.teamPairs : game.gameState.teamPairs
       };
     }
     if (currentRound !== undefined) game.currentRound = currentRound;
